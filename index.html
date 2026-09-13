@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Éoliennes Aux Quatre Vents — Simulateur 3D</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div id="crosshair"></div>
+
+<div id="miniMapFloat">
+  <div id="miniMapFloatHead">
+    <span>🗺️ Carte — cliquez pour déplacer la maison</span>
+    <button id="btnToggleMiniMap" title="Réduire/agrandir la carte">–</button>
+  </div>
+  <div id="osmMap"></div>
+</div>
+
+<div id="ui">
+  <div id="panel-toggle-tab">
+    <button id="btnCollapse" title="Replier/déplier le panneau">☰</button>
+  </div>
+
+  <div id="panel">
+    <h1>🌬️ Éoliennes Aux Quatre Vents</h1>
+    <p class="subtitle">Beuzet · Saint-Denis · Lonzée — La Bruyère (BE)</p>
+
+    <details open>
+      <summary>1. Maison &amp; caméra</summary>
+      <div class="block">
+        <button id="btnPlaceHouse" class="primary">📍 Cliquer sur le terrain pour placer la maison</button>
+        <div class="row">
+          <label>Hauteur des yeux (m)</label>
+          <input type="range" id="eyeHeight" min="0" max="10" step="0.1" value="1.6">
+          <span id="eyeHeightVal" class="valtag">1.6 m</span>
+        </div>
+        <div class="row btnrow">
+          <button id="btnFreeMode">🚁 Vue libre (survol)</button>
+          <button id="btnEyeMode" class="active">🏠 Vue depuis la maison</button>
+        </div>
+        <div class="row btnrow" id="presetRow">
+          <span class="mini-label">Emplacements suggérés :</span>
+        </div>
+        <div class="row hint">
+          Vue libre : <b>WASD</b> + glisser souris/doigt (regarder), <b>Maj</b>=vite, <b>Q/E</b>=monter/descendre, molette=vitesse.<br>
+          Vue maison : glisser souris/doigt pour tourner la tête, <b>WASD</b>/flèches pour se déplacer (<b>Maj</b>=plus vite) — la maison suit, toujours au niveau des yeux.
+        </div>
+        <div class="row hint">📍 La carte OSM en bas à droite permet aussi de déplacer la maison (clic ou glisser le repère 🏠).</div>
+        <div class="row btnrow">
+          <button id="btnShareLink">🔗 Copier le lien de cette vue</button>
+        </div>
+        <div class="row hint">Enregistre la position, la hauteur et la direction du regard dans le lien — pratique pour le partager tel quel.</div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>2. Regarder une éolienne</summary>
+      <div class="block" id="lookButtons"></div>
+    </details>
+
+    <details open>
+      <summary>3. Distances, dénivelé, horizon</summary>
+      <div class="block">
+        <table id="turbineTable">
+          <thead><tr><th>#</th><th>Dist.</th><th>Dénivelé</th><th>Azimut</th><th>Angle (moyeu)</th><th>Visible</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+
+    <details open>
+      <summary>☀️ Soleil, heure &amp; ombres portées</summary>
+      <div class="block">
+        <div class="row">
+          <label>Date</label>
+          <input type="date" id="sunDate" value="2026-06-21">
+        </div>
+        <div class="row">
+          <label>Heure (locale, Belgique)</label>
+          <input type="range" id="sunTime" min="0" max="24" step="0.05" value="20">
+          <span id="sunTimeVal" class="valtag">20:00</span>
+        </div>
+        <div class="row btnrow">
+          <button id="btnSunPlay">▶ Jouer la journée</button>
+        </div>
+        <div class="row btnrow" id="sunPresetRow">
+          <span class="mini-label">Suggestions :</span>
+        </div>
+        <div class="row hint" id="sunReadout">Soleil : …</div>
+        <div class="row btnrow">
+          <label><input type="checkbox" id="chkShadows" checked> Ombres portées (éoliennes, pales incluses)</label>
+        </div>
+        <div class="row hint">Autour du 21 juin, en soirée (20h-22h), le soleil est très bas à l'ouest/nord-ouest : c'est le moment où les ombres des éoliennes (et le clignotement des pales en rotation) portent le plus loin. Les ombres sont calculées en temps réel sur le relief réel, dans un rayon de ~2,5 km autour du parc.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>4. Profil d'horizon (panorama)</summary>
+      <div class="block">
+        <canvas id="horizonCanvas" width="600" height="160"></canvas>
+        <div class="row hint">Silhouette de chaque éolienne au-dessus de la ligne d'horizon réelle (relief entre la maison et l'éolienne). Vert = visible, orange = partiellement masqué, rouge = totalement caché.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>5. Éoliennes — paramètres</summary>
+      <div class="block">
+        <div class="row">
+          <label>Modèle (repère de taille)</label>
+          <select id="turbineModel"></select>
+        </div>
+        <div class="row">
+          <label>Hauteur totale (bout de pale, m)</label>
+          <input type="number" id="totalHeight" value="230" step="1" min="50" max="324">
+        </div>
+        <div class="row">
+          <label>Hauteur moyeu (m)</label>
+          <input type="number" id="hubHeight" value="149" step="1" min="30" max="250">
+        </div>
+        <div class="row hint">Rayon de pale = (Hauteur totale − Hauteur moyeu). Le modèle par défaut (D=162 m, H=230 m) reprend les caractéristiques officielles du modèle étudié pour ce projet ; les autres entrées ne sont que des repères indicatifs (ordre de grandeur public) — choisissez "Personnalisé" pour saisir d'autres chiffres.</div>
+        <div class="row btnrow">
+          <label><input type="checkbox" id="chkEiffel"> 🗼 Repère Tour Eiffel (324 m)</label>
+          <label><input type="checkbox" id="chkHuman" checked> 🚶 Repères humains (1,75 m), à côté de chaque éolienne</label>
+          <label><input type="checkbox" id="chkCar" checked> 🚗 Repères voiture (~4,3 m), à côté de chaque éolienne</label>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>6. Affichage terrain</summary>
+      <div class="block">
+        <div class="row btnrow">
+          <label><input type="radio" name="groundTexture" value="crop"> Champs (stylisé)</label>
+          <label><input type="radio" name="groundTexture" value="satellite" checked> Satellite (photo réelle)</label>
+        </div>
+        <div class="row hint">Photo aérienne réelle du site (SPW, Geoportail de Wallonie — orthophoto la plus récente). N'affecte que le rendu du sol ; le relief et les calculs restent inchangés.</div>
+        <div class="row">
+          <label>Exagération du relief</label>
+          <input type="range" id="exaggeration" min="1" max="4" step="0.1" value="1">
+          <span id="exagVal" class="valtag">1.0×</span>
+        </div>
+        <div class="row hint">N'affecte que le rendu visuel — les calculs de distance/angle/horizon utilisent toujours l'altitude réelle.</div>
+        <div class="row btnrow">
+          <label><input type="checkbox" id="chkWireframe"> Fil de fer</label>
+          <label><input type="checkbox" id="chkLabels"> Étiquettes 3D</label>
+        </div>
+        <div class="row btnrow">
+          <label><input type="checkbox" id="chkBuildings" checked> Bâtiments 3D</label>
+        </div>
+        <div class="row hint">Empreintes réelles (PICC, geoportail.wallonie.be) — <span id="buildingsCount">…</span> bâtiments. Hauteurs estimées par type (habitation, annexe, agricole…), non mesurées.</div>
+        <div class="row btnrow">
+          <label><input type="checkbox" id="chkVegetation" checked> 🌳 Végétation (arbres, haies, bois)</label>
+        </div>
+        <div class="row hint">Positions réelles (OpenStreetMap) — <span id="vegetationCount">…</span> éléments (arbres isolés, alignements, haies, bois/forêts). Hauteurs estimées (non mesurées) : ~2-4 m arbres/haies, ~7-14 m en bois/forêt.</div>
+      </div>
+    </details>
+
+    <details>
+      <summary>7. Mini-carte</summary>
+      <div class="block">
+        <canvas id="miniMap" width="260" height="260"></canvas>
+      </div>
+    </details>
+
+    <details>
+      <summary>ℹ️ Précision des positions</summary>
+      <div class="block hint">
+        Relief : réel (EU-DEM 25 m, via opentopodata.org). Position du site : réelle (recalée sur les gares de Lonzée / Beuzet / Saint-Denis-Bovesse — OpenStreetMap). Positions des 6 éoliennes (E1-E6) : <b>estimées</b> à partir des 2 cartes schématiques fournies (l'orientation et la disposition relative sont fiables ; l'échelle exacte a été déduite de l'espacement réaliste pour des machines de 230 m, pas du texte "500 m" figurant sur le croquis qui semble incohérent). À corriger dans <code>data/site_data.js</code> si vous obtenez les coordonnées officielles du permis.
+      </div>
+    </details>
+  </div>
+</div>
+
+<div id="turbineLabels"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="data/terrain_data.js"></script>
+<script src="data/site_data.js"></script>
+<script src="data/buildings_data.js"></script>
+<script src="data/vegetation_data.js"></script>
+<script src="data/orthophoto_data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
